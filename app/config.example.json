@@ -1,0 +1,21 @@
+{
+  "Character": "deepseek",
+  "Pose": "auto",
+  "Scale": 1,
+  "BubbleScale": 1,
+  "FontScale": 1,
+  "SoundEnabled": true,
+  "SoundVolume": 850,
+  "Topmost": true,
+  "SleepSeconds": 300,
+  "AutoQuoteMinutes": 3,
+  "BubbleMode": "quota",
+  "TrayEnabled": true,
+  "StartHidden": false,
+  "QuotaProvider": "auto",
+  "DeepSeekApiKey": "",
+  "StallDetectSeconds": 45,
+  "PauseMonitorUntil": 0,
+  "Left": -1,
+  "Top": -1
+}

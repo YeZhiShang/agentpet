@@ -1,0 +1,22 @@
+# ---- 本地配置：含明文 API Key，绝不入库 ----
+app/config.json
+
+# ---- 运行时状态 / 日志 / 进程文件 ----
+app/runtime/*.pid
+app/runtime/*.log
+app/runtime/deepseek-usage.json
+app/runtime-quota.json
+app/runtime-status.json
+app/runtime-error.log
+app/*.log
+app/*.flag
+
+# ---- 备份 ----
+backup/
+*.bak
+*.tmp
+
+# ---- 系统 ----
+Thumbs.db
+desktop.ini
+.DS_Store
