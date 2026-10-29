@@ -1,4 +1,4 @@
-# AgentPet · 深鲸娘桌宠
+# AgentPet · 鲸鱼娘桌宠
 
 Windows 桌面宠物（PowerShell + WPF），会读本机的 Agent 会话文件，实时播报 AI 在干什么；点她一下能看到 DeepSeek 余额或 Codex 额度。
 
@@ -28,6 +28,8 @@ Windows 桌面宠物（PowerShell + WPF），会读本机的 Agent 会话文件�
 | `backup/` | 本地备份（不入库） |
 
 ## 授权
+
+本项目基于 [uoweme325/AgentPet](https://github.com/uoweme325/AgentPet) 开发完成，增添了部分功能以及立绘。
 
 - 代码：MIT
 - 立绘与音效：社区二创素材，**仅限个人学习与非营利使用**
