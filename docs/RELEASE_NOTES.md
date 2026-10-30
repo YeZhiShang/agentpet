@@ -1,36 +1,50 @@
-# AgentPet v1.4.1 GitHub 发布包
+# 改动记录
 
-这是 AgentPet v1.4.1 的源码发布包，适合上传到 GitHub Release 或作为仓库初始内容使用。
+本文件记录本仓库相对上游 [uoweme325/AgentPet](https://github.com/uoweme325/AgentPet) v1.4.1 的自有改动。
+功能与配置的完整说明见根目录 [README.md](../README.md)。
 
-## 包含内容
+## 2026-10-30
 
-- `AgentPet.ps1`、`AgentPet.xaml`：桌宠主程序
-- `runtime/agent-monitor.mjs`、`runtime/stop-agent.ps1`：状态监控与安全退出脚本
-- `assets/`、`preview/`：角色立绘、托盘图标、音效和预览图
-- Windows 启动、退出、快捷方式和开机自启脚本
-- `config.example.json`：通用配置示例
-- `README.md`、`LICENSE`：使用说明与许可证
+### 新增
 
-## 发布包处理规则
+- **低余额提醒**（移植自上游 v1.5.0 的交互）：余额低于 `LowBalanceCnyThreshold`（默认 ¥5）时弹一次气泡，
+  边沿触发，回到阈值以上后重新武装；忙碌 / 气泡隐藏 / 正在看面板时顺延，不丢失提醒。
+- 运行监控在余额数据里附带数值字段 `amount`，UI 不再从 `"¥43.57"` 里解析金额。
 
-发布包没有包含本机的 `config.json`、运行日志、PID 文件、额度快照、状态快照、备份文件和临时文件。这些文件可能记录窗口坐标、会话状态或本机运行信息。首次启动时，程序会在本地自动生成配置文件。
+### 修复
 
-## 使用要求
+- 快捷方式脚本改用环境变量传参（`$env:VBS_PATH`）并以 `[char]34` 生成引号，
+  路径含单引号时不再破坏语法；补充启动脚本存在性检查与创建后回读校验。
+- 仓库行尾规范化：新增 `.gitattributes`，仓库内统一存 LF，`.bat` / `.cmd` / `.ps1` / `.vbs` 检出为 CRLF。
 
-- Windows PowerShell 5.1、WPF 和 .NET Framework（Windows 系统自带）
-- 如果需要完整读取 Antigravity、Codex、DSH 的工作状态，请准备可用的现代 Node.js 运行时；本版本已在 Node.js v24.22.1 环境中完成验证
-- 双击 `启动 AgentPet.bat` 启动；双击 `退出 AgentPet.bat` 退出
+## 2026-10-29
 
-## v1.4.1 重点
+### 新增
 
-- 托盘角色图标按透明像素裁切后统一为 32px，避免不同角色显示大小不齐
-- 拖动边界按当前显示器工作区、DPI 和多屏负坐标计算，角色最多移出屏幕一半，气泡不参与限制
-- 保留托盘隐藏、唤起、角色切换、额度与工作状态入口
+- **DeepSeek 余额看板**：直连官方 `GET /user/balance`，与 Codex 额度共用面板，按当前在跑的 Agent 自动切换。
+  - `QuotaProvider` = `auto`（默认）/ `deepseek` / `codex`
+  - 今日与累计为本地累计（对比前后余额差额），只统计程序运行期间观察到的消耗
+- **第四位角色「小鲸鱼」**：立绘取自 [YunYueSama/codex-deepseek-pet](https://github.com/YunYueSama/codex-deepseek-pet)，
+  配套独立主题配色、台词池、托盘图标与菜单项。
+- HTTP 错误码映射为可读文案（401 密钥失效 / 402 余额不足 / 403 无权限 / 429 频率限制 / 5xx 服务端错误 / 网络不通）。
 
-## 发布前检查
+### 修复
 
-上传前请确认仓库中没有把 `config.json`、`*.log`、`*.pid`、`runtime-status.json`、`runtime-quota.json` 或本机截图一并提交。项目根目录的 `.gitignore` 已覆盖主要运行时文件。
+- **启动位置跑到屏幕外**：窗口显示前 `PresentationSource` 为空，DPI 读到 1.0，
+  拿物理像素边界去校验 DIP 坐标必然误判。改用 `SystemParameters.VirtualScreen*`（DIP），
+  且判据从「左上角在屏内」改为「整个窗口在屏内」。
+- **拖动能把角色拖出屏幕**：原逻辑限制「角色中心在屏内」，改为整个窗口限制在当前显示器工作区内。
+- **手改配置被覆盖**：`Save-Config` 写盘前先读磁盘，`DeepSeekApiKey` / `QuotaProvider` 以磁盘值为准。
+- **`.bat` 全是 LF 换行**：cmd 解析失败，全部转 CRLF（保持 GBK 编码）。
+- **开机自启指向旧路径**：目录调整后同步更新注册表项。
 
-## 致谢与声明
+### 整理
 
-发布包包含 THIRD_PARTY_NOTICES.md，并在 README 中声明参考了 [T7moris/GPT-Niang](https://github.com/T7moris/GPT-Niang)、[PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet)，以及 AI 生成素材和 AI 辅助开发情况。
+- 根目录只保留 4 个启动脚本，程序 / 文档 / 备份分入 `app\`、`docs\`、`backup\`。
+- `.gitignore` 排除 `config.json`、运行时状态、日志、PID 与备份，避免密钥入库。
+
+## 未采用的方案
+
+上游 v1.5.0 改为「经本机 DSH 宿主读取余额，不落盘 API Key」，思路更优，但实测 DSH 0.2.1-rc.5
+并未提供 `/dsh-pet-7340/*` 接口（404，且整个 `app.asar` 中无相关代码），该功能在公开版 DSH 上不可用。
+本仓库因此保留直连 API 的实现；若将来宿主提供该接口，只需替换 `runtime/agent-monitor.mjs` 中的取数逻辑。
