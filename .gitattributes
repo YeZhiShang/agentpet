@@ -1,0 +1,14 @@
+# 统一在仓库里存 LF，检出时按类型还原成 Windows 需要的行尾
+* text=auto eol=lf
+
+# cmd 解析批处理必须是 CRLF，否则整份脚本会被拆错行
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.vbs text eol=crlf
+
+# 二进制，别做任何转换
+*.png binary
+*.ico binary
+*.webp binary
+*.moc3 binary
