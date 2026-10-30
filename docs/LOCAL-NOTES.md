@@ -1,6 +1,6 @@
 # 这个目录是什么
 
-**AgentPet v1.4.1**（PowerShell + WPF 原生实现）的一个本地改造版：
+**AgentPet v1.5.0**（PowerShell + WPF 原生实现）的一个本地改造版：
 读本机的 Agent 会话文件（Antigravity / Codex / DSH）播报工作状态，并把原来的「Codex 额度」换成了「DeepSeek 余额」。
 
 ## 目录结构
