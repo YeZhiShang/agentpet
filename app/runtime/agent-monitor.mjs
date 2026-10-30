@@ -759,7 +759,7 @@ class AgentMonitor {
         planLabel: data.is_available === false ? '不可用' : 'DeepSeek',
         observedAt: Date.now(),
         windows: [
-          { id: 'balance', label: '余额', text: '¥' + total.toFixed(2), sub: '赠送 ¥' + granted.toFixed(2) },
+          { id: 'balance', label: '余额', text: '¥' + total.toFixed(2), sub: '赠送 ¥' + granted.toFixed(2), amount: Number(total.toFixed(2)) },
           { id: 'today', label: '今日', text: '¥' + usage.today.toFixed(2), sub: '累计 ¥' + usage.total.toFixed(2) }
         ]
       };

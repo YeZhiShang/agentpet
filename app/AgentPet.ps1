@@ -171,6 +171,8 @@ $DefaultConfig = [ordered]@{
     StartHidden       = $false      # start with the pet hidden but tray available
     QuotaProvider     = "auto"      # "auto" = 跟随当前 Agent(DSH→余额 / Codex→额度)，也可强制 "deepseek" / "codex"
     DeepSeekApiKey    = ""          # DeepSeek 余额查询用；填 sk- 开头的那串
+    LowBalanceAlertEnabled = $true  # 余额低于阈值时弹一次提醒
+    LowBalanceCnyThreshold = 5.0    # 提醒阈值（人民币）
     StallDetectSeconds = 45         # 0 = disable stalled inference
     PauseMonitorUntil  = 0          # UTC milliseconds; 0 = normal broadcasting
     Left              = -1
@@ -1243,6 +1245,56 @@ function Update-QuotaColors {
     }
 }
 
+# 低余额提醒状态（边沿触发：只从"不低"变"低"时提醒一次）
+$script:isLowBalance = $false
+$script:lowBalanceAlertArmed = $false
+$script:alertGraceUntil = [DateTime]::MinValue
+
+function Check-LowBalanceAlert($qObj) {
+    if (-not $qObj -or -not $qObj.ok) { return }
+
+    $thresh = if ($null -ne $Config.LowBalanceCnyThreshold) { [decimal]$Config.LowBalanceCnyThreshold } else { [decimal]5.0 }
+
+    # 优先用 monitor 给的数值，老格式则从 "¥44.87" 里抠
+    $amt = $null
+    $w0 = @($qObj.windows)[0]
+    if ($w0 -and $null -ne $w0.amount) {
+        $amt = [decimal]$w0.amount
+    } elseif ($w0 -and ([string]$w0.text -match '¥s*([0-9]+(?:.[0-9]+)?)')) {
+        $amt = [decimal]$Matches[1]
+    }
+    if ($null -eq $amt) { return }
+    # 窗口还没显示（启动瞬间读快照）时不判定，避免"提醒了却弹不出来"
+    if (-not $Window.IsLoaded) { return }
+    # 启动后头 4 秒先让 Agent 状态报上来，否则可能在"其实正忙"的时候弹
+    if ([DateTime]::UtcNow -lt $script:alertGraceUntil) { return }
+
+    # 开关从"关"变"开"时重新武装：此刻仍低额就再提醒一次
+    $alertOn = ($Config.LowBalanceAlertEnabled -ne $false)
+    if ($alertOn -and -not $script:lowBalanceAlertArmed) { $script:isLowBalance = $false }
+    $script:lowBalanceAlertArmed = $alertOn
+
+    $isLow = ($amt -lt $thresh)
+    if (-not $isLow) {
+        $script:isLowBalance = $false   # 回到阈值以上，重新武装
+        return
+    }
+    if ([bool]$script:isLowBalance) { return }   # 已经提醒过，不重复
+    if (-not $alertOn) { return }
+
+    # 以下都是"暂时不方便打扰"：先不置位，等条件合适了再提醒（忙完/关掉面板后）
+    if ($script:manualBubbleHidden) { return }
+    if ($script:agentBusy) { return }
+    if ([DateTime]::UtcNow -lt $script:userInspectUntil) { return }
+
+    $script:isLowBalance = $true
+    Play-ReleaseSound
+    $script:userInspectUntil = [DateTime]::UtcNow.AddSeconds(6.5)   # 期间不让工作面板抢回去
+    Set-ActiveBubblePanel "quota"
+    Show-Bubble 6.5
+    Write-PetLog ("Low balance alert: ¥" + $amt + " < ¥" + $thresh)
+}
+
 function Apply-QuotaObject($qObj) {
     if (-not $qObj) { return }
     $script:refreshingUntil = [DateTime]::MinValue
@@ -1305,6 +1357,7 @@ function Apply-QuotaObject($qObj) {
                 $WeekReset.Text   = [string]$mw[1].sub
             }
             Update-QuotaColors
+            Check-LowBalanceAlert $qObj
             return
         }
         if ($script:lastQuotaMode -eq 'money') {
@@ -2626,6 +2679,7 @@ if (-not $placed) {
 
 $Window.Add_Loaded({
     Write-PetLog "Window Loaded event triggered successfully."
+    $script:alertGraceUntil = [DateTime]::UtcNow.AddSeconds(4)
     Update-Facing
     Start-AgentMonitor
     $Timer.Start()
