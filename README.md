@@ -38,44 +38,6 @@ Windows 桌面宠物（PowerShell + WPF 原生实现）。她会读取本机上 
 | 桌面快捷方式 | `创建桌面快捷方式.bat` |
 | 开机自启 | `开机自启设置 (可选).bat`（选 1 开启 / 2 关闭） |
 
-## 目录结构
-
-```
-桌宠\
-├─ 启动 AgentPet.bat          启动
-├─ 退出 AgentPet.bat          退出
-├─ 创建桌面快捷方式.bat
-├─ 开机自启设置 (可选).bat
-├─ app\                       程序本体
-│   ├─ AgentPet.ps1           主程序
-│   ├─ AgentPet.xaml          界面
-│   ├─ launch.vbs             无窗口启动器
-│   ├─ config.json            配置（含明文 API Key）
-│   ├─ assets\                立绘、图标、音效、台词
-│   └─ runtime\               agent-monitor.mjs 及运行时状态
-├─ docs\                      文档、许可、第三方致谢
-└─ backup\                    本地备份（不入库）
-```
-
-## 配置说明
-
-全部字段位于 `app/config.json`，改完重启生效（`DeepSeekApiKey` 与 `QuotaProvider` 例外，会在下次轮询时读取）。
-
-| 字段 | 说明 |
-|---|---|
-| `Character` | `claude` / `dragon` / `gemini` / `deepseek` |
-| `Pose` | `auto` 或固定某个动作（idle / think / work / sleep / happy） |
-| `Scale` `BubbleScale` `FontScale` | 角色、气泡、字号缩放 |
-| `BubbleMode` | 空闲时的默认面板：`quota` / `quote` |
-| `QuotaProvider` | `auto`（跟随 Agent）/ `deepseek` / `codex` |
-| `DeepSeekApiKey` | 余额查询用的 key |
-| `LowBalanceAlertEnabled` `LowBalanceCnyThreshold` | 低余额提醒开关与阈值 |
-| `Topmost` `TrayEnabled` `StartHidden` | 置顶、托盘、启动隐藏 |
-| `SoundEnabled` `SoundVolume` | 音效 |
-| `StallDetectSeconds` | 多久没动静算「卡住」，默认 45 秒 |
-| `PauseMonitorUntil` | 播报暂停截止时间（UTC 毫秒，0 = 正常） |
-| `Left` `Top` | 窗口位置（DIP），`-1` = 自动贴右下角 |
-
 ## 看板说明
 
 - **面板三种**：工作状态、额度、随机台词。忙碌时优先显示工作状态，空闲时按 `BubbleMode` 显示。
@@ -83,7 +45,7 @@ Windows 桌面宠物（PowerShell + WPF 原生实现）。她会读取本机上 
 - **左键点她**：切到看板并触发一次刷新，8 秒内不会被工作状态抢回去。
 - **数据口径**：余额是实时值；「今日 / 累计」是**本地累计** —— 每次刷新和上次余额比，掉了多少记多少，因此只统计程序运行期间观察到的消耗。
 
-## 与上游 v1.4.1 的差异
+## 1.5.0 更新
 
 **新增**
 
@@ -104,13 +66,6 @@ Windows 桌面宠物（PowerShell + WPF 原生实现）。她会读取本机上 
 
 - 根目录只留启动脚本，程序、文档、备份分目录
 - 仓库行尾规范化（仓库存 LF，检出按类型还原 CRLF），`.gitignore` 排除配置与运行时文件
-
-## 已知限制
-
-- **API Key 明文存储**：在 `app/config.json` 里，**不要把该文件分享或提交到公开仓库**（仓库已用 `.gitignore` 排除）。
-- **今日 / 累计不完整**：只统计程序运行期间观察到的余额下降。
-- **未采用 DSH 宿主查询**：上游 v1.5.0 改为「经本机 DSH 宿主读取余额、不落盘密钥」，思路更好，但 DSH 0.2.1-rc.5 尚未提供该接口（`/dsh-pet-7340/*` 实测 404），因此本仓库仍走直连 API。
-- **混合 DPI 多显示器**未做全面实测。
 
 ## 授权与致谢
 
