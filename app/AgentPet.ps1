@@ -182,6 +182,114 @@ $DefaultConfig = [ordered]@{
 $Config = [ordered]@{}
 foreach ($k in $DefaultConfig.Keys) { $Config[$k] = $DefaultConfig[$k] }
 
+# ============================================================================
+# API Key 的加密存储（Windows 凭据管理器）
+# ============================================================================
+# 密钥不再写进 config.json，改由系统凭据管理器保管（DPAPI 加密，绑定当前用户）。
+# 只有本机、本用户能解出来；配置文件可以放心备份/分享。
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+
+public static class WinCred {
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct CREDENTIAL {
+        public int Flags;
+        public int Type;
+        public string TargetName;
+        public string Comment;
+        public long LastWritten;
+        public int CredentialBlobSize;
+        public IntPtr CredentialBlob;
+        public int Persist;
+        public int AttributeCount;
+        public IntPtr Attributes;
+        public string TargetAlias;
+        public string UserName;
+    }
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern bool CredWrite(ref CREDENTIAL credential, int flags);
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern bool CredRead(string target, int type, int reservedFlag, out IntPtr credentialPtr);
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern bool CredDelete(string target, int type, int flags);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    static extern void CredFree(IntPtr buffer);
+
+    public static bool Write(string target, string userName, string secret) {
+        byte[] blob = Encoding.Unicode.GetBytes(secret);
+        CREDENTIAL cred = new CREDENTIAL();
+        cred.Type = 1;          // CRED_TYPE_GENERIC
+        cred.TargetName = target;
+        cred.UserName = userName;
+        cred.Persist = 2;       // CRED_PERSIST_LOCAL_MACHINE
+        cred.CredentialBlobSize = blob.Length;
+        cred.CredentialBlob = Marshal.AllocHGlobal(blob.Length);
+        try {
+            Marshal.Copy(blob, 0, cred.CredentialBlob, blob.Length);
+            if (!CredWrite(ref cred, 0)) return false;
+            return true;
+        } finally {
+            Marshal.FreeHGlobal(cred.CredentialBlob);
+        }
+    }
+
+    public static string Read(string target) {
+        IntPtr ptr;
+        if (!CredRead(target, 1, 0, out ptr)) return null;
+        try {
+            CREDENTIAL cred = (CREDENTIAL)Marshal.PtrToStructure(ptr, typeof(CREDENTIAL));
+            if (cred.CredentialBlobSize <= 0) return "";
+            byte[] bytes = new byte[cred.CredentialBlobSize];
+            Marshal.Copy(cred.CredentialBlob, bytes, 0, bytes.Length);
+            return Encoding.Unicode.GetString(bytes);
+        } finally {
+            CredFree(ptr);
+        }
+    }
+
+    public static bool Delete(string target) {
+        return CredDelete(target, 1, 0);
+    }
+
+    public static int LastError() {
+        return Marshal.GetLastWin32Error();
+    }
+}
+'@ -ErrorAction SilentlyContinue
+
+$script:CredTargetName = 'AgentPet:DeepSeekApiKey'
+$script:ResolvedApiKey = ''
+
+function Get-StoredApiKey {
+    try {
+        $v = [WinCred]::Read($script:CredTargetName)
+        if ($null -ne $v) { return [string]$v }
+    } catch {}
+    return $null
+}
+
+function Set-StoredApiKey([string]$key) {
+    try {
+        $ok = [WinCred]::Write($script:CredTargetName, 'AgentPet', $key)
+        if (-not $ok) { Write-PetLog ("凭据写入失败，Win32 错误码 " + [WinCred]::LastError()) }
+        return $ok
+    } catch {
+        Write-PetLog ("凭据写入异常：" + $_.Exception.Message)
+        return $false
+    }
+}
+
+function Remove-StoredApiKey {
+    try { [void][WinCred]::Delete($script:CredTargetName) } catch {}
+}
+
+
 function Save-Config {
     $tmpPath = Join-Path $BaseDir ("config.json." + $PID + ".tmp")
     try {
@@ -272,6 +380,43 @@ function Load-Config {
 }
 
 Load-Config
+
+# 解析 API Key：优先系统凭据管理器，其次兼容 config.json 里的旧明文（并顺手迁移过去）
+try {
+    $storedKey = Get-StoredApiKey
+    $plainKey  = [string]$Config.DeepSeekApiKey
+    if ($storedKey) {
+        $script:ResolvedApiKey = $storedKey
+        if ($plainKey -and $plainKey -ne $storedKey) {
+            # 有人习惯直接改 config.json：以文件里的新值为准，覆盖凭据
+            if (Set-StoredApiKey $plainKey) {
+                $script:ResolvedApiKey = $plainKey
+                Write-PetLog '检测到 config.json 里填了新 Key，已更新到 Windows 凭据管理器'
+            }
+            $Config.DeepSeekApiKey = ''
+            $script:forceSaveManualFields = $true
+            Save-Config
+        } elseif ($plainKey) {
+            $Config.DeepSeekApiKey = ''
+            $script:forceSaveManualFields = $true
+            Save-Config
+        }
+    } elseif ($plainKey) {
+        if (Set-StoredApiKey $plainKey) {
+            $script:ResolvedApiKey = $plainKey
+            $Config.DeepSeekApiKey = ''
+            $script:forceSaveManualFields = $true
+            Save-Config
+            Write-PetLog '已把 config.json 里的明文 Key 迁移到 Windows 凭据管理器'
+        } else {
+            # 凭据管理器不可用（极少见）：保留旧行为，功能不受影响
+            $script:ResolvedApiKey = $plainKey
+            Write-PetLog '警告：凭据管理器不可用，Key 仍以明文保存在 config.json'
+        }
+    }
+} catch {
+    Write-PetLog ('API Key 解析失败：' + $_.Exception.Message)
+}
 
 # ============================================================================
 # 4. Character Quote Pools (Strictly Separated per Character!)
@@ -1618,7 +1763,7 @@ function Show-ApiKeyDialog {
     [void]$panel.Children.Add($title)
 
     $hint = New-Object System.Windows.Controls.TextBlock
-    $hint.Text = '在 platform.deepseek.com 创建，形如 sk- 开头的一串；只保存在本机 config.json 里。'
+    $hint.Text = '在 platform.deepseek.com 创建，形如 sk- 开头的一串；加密保存在 Windows 凭据管理器，不写入配置文件。'
     $hint.FontSize = 11.5
     $hint.TextWrapping = 'Wrap'
     $hint.Margin = New-Object System.Windows.Thickness(0, 5, 0, 10)
@@ -1630,7 +1775,8 @@ function Show-ApiKeyDialog {
     $pwd.FontSize = 13
     $pwd.Padding = New-Object System.Windows.Thickness(8, 4, 8, 4)
     $pwd.FontFamily = 'Consolas, Microsoft YaHei UI'
-    if ($Config.DeepSeekApiKey) { $pwd.Password = [string]$Config.DeepSeekApiKey }
+    $curKey = if ($script:ResolvedApiKey) { $script:ResolvedApiKey } elseif ($Config.DeepSeekApiKey) { [string]$Config.DeepSeekApiKey } else { '' }
+    if ($curKey) { $pwd.Password = $curKey }
     [void]$panel.Children.Add($pwd)
 
     $status = New-Object System.Windows.Controls.TextBlock
@@ -1683,9 +1829,16 @@ function Show-ApiKeyDialog {
     $btnSave.Add_Click({
         $k = ($pwd.Password + '').Trim()
         if (-not $k) { $status.Text = '请先填入 Key'; return }
-        $Config.DeepSeekApiKey = $k
+        $saved = Set-StoredApiKey $k
+        if ($saved) {
+            $Config.DeepSeekApiKey = ''            # 明文不再落盘
+        } else {
+            $Config.DeepSeekApiKey = $k            # 凭据管理器不可用时保底
+        }
         $script:forceSaveManualFields = $true
         Save-Config
+        $script:ResolvedApiKey = $k
+        Restart-AgentMonitor
         Request-QuotaRefresh
         $dlg.Close()
         $r = Test-DeepSeekApiKey $k
@@ -2291,6 +2444,17 @@ function Find-NodeExe {
     return $null
 }
 
+function Restart-AgentMonitor {
+    try {
+        if ($script:MonitorProc -and -not $script:MonitorProc.HasExited) {
+            Start-Process -FilePath "taskkill.exe" -ArgumentList "/F", "/T", "/PID", "$($script:MonitorProc.Id)" -WindowStyle Hidden -Wait -ErrorAction SilentlyContinue
+            $script:MonitorProc = $null
+        }
+    } catch {}
+    Start-Sleep -Milliseconds 400
+    Start-AgentMonitor
+}
+
 function Start-AgentMonitor {
     if ($script:MonitorProc -and -not $script:MonitorProc.HasExited) { return }
     $nodeExe = Find-NodeExe
@@ -2303,6 +2467,10 @@ function Start-AgentMonitor {
         $psi.Arguments = "`"$MonitorScript`" --parent-pid $PID --stall-seconds $stallSec"
         $psi.WorkingDirectory = $BaseDir
         $psi.UseShellExecute = $false
+        # 密钥只经环境变量传给子进程，不落盘（monitor 优先读 config，读不到才用环境变量）
+        if ($script:ResolvedApiKey) {
+            try { $psi.EnvironmentVariables['DEEPSEEK_API_KEY'] = $script:ResolvedApiKey } catch {}
+        }
         $psi.CreateNoWindow = $true
         $psi.RedirectStandardOutput = $false
         $psi.RedirectStandardError = $false

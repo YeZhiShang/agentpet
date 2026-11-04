@@ -96,3 +96,23 @@ monitor 侧的 `windows[0].amount` 提供数值，PS1 不再需要从 "¥44.87" 
 
 原来是把路径直接拼进 PowerShell 的 `-Command` 字符串，路径带单引号会破坏语法。
 现在改成通过**环境变量**传参 + `[char]34` 生成引号，并加了存在性检查与创建后校验输出。
+
+## API Key 的存放（2026-11-04 改）
+
+密钥**不再明文写在 `config.json`**，改由 **Windows 凭据管理器**保管：
+
+- 目标名：`AgentPet:DeepSeekApiKey`（类型 Generic，Local machine 持久化）
+- 底层是 DPAPI，加密材料绑定**当前 Windows 用户**；别的账号、别的机器都解不开
+- 查看/删除：控制面板 → 凭据管理器 → Windows 凭据，或命令行 `cmdkey /list`、`cmdkey /delete:AgentPet:DeepSeekApiKey`
+
+**改动位置**
+
+| 位置 | 变化 |
+|---|---|
+| 启动时 | 先读凭据；若 `config.json` 里还有旧明文，自动迁移过去并把文件里的字段清空 |
+| 手动改配置文件 | 若文件里的 Key 与凭据不同，视为「用户更新了 Key」，覆盖凭据后再清空文件字段 |
+| 对话框保存 | 写凭据 → 清空 `config.json` 字段 → 重启 monitor 让子进程拿到新 Key |
+| monitor 取数 | 通过 `DEEPSEEK_API_KEY` 环境变量（仅传给孩子进程），不落盘 |
+
+**功能影响**：余额查询、看板、低余额提醒全部照常。唯一的代价是 **换机器/重装系统后要重新填一次 Key**（凭据不跟着配置文件走）。
+若凭据管理器不可用（极少见），会退化成旧的明文方式并在日志里警告，功能不中断。
