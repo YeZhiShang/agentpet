@@ -189,7 +189,8 @@ function Save-Config {
         # 否则进程内存里还是启动时读到的旧值，任何一次保存（拖位置、点她、切菜单）
         # 都会把手动填进去的新 Key 覆盖回去 —— 表现就是「查几次余额之后 key 变了」。
         try {
-            if (Test-Path $ConfigPath) {
+            # 例外：本次保存就是程序自己改的这两个字段（设置 API Key 的对话框），此时以内存为准
+            if (-not $script:forceSaveManualFields -and (Test-Path $ConfigPath)) {
                 $diskCfg = [System.IO.File]::ReadAllText($ConfigPath, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
                 foreach ($manualKey in @('DeepSeekApiKey', 'QuotaProvider')) {
                     $diskVal = $diskCfg.$manualKey
@@ -197,6 +198,7 @@ function Save-Config {
                 }
             }
         } catch {}
+        $script:forceSaveManualFields = $false
 
         $json = $Config | ConvertTo-Json -Depth 4
         [System.IO.File]::WriteAllText($tmpPath, $json, [System.Text.Encoding]::UTF8)
@@ -1121,6 +1123,8 @@ $quota = New-Object System.Windows.Forms.ToolStripMenuItem($quotaLabel)
         $startHiddenItem.CheckOnClick = $true
         [void]$settings.DropDownItems.Add($trayEnabledItem); [void]$settings.DropDownItems.Add($startHiddenItem)
         [void]$menu.Items.Add($settings)
+        $apiKeyItem = New-Object System.Windows.Forms.ToolStripMenuItem("设置 DeepSeek API Key…")
+        [void]$menu.Items.Add($apiKeyItem)
         [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
         $exit = New-Object System.Windows.Forms.ToolStripMenuItem("退出 AgentPet")
         [void]$menu.Items.Add($exit)
@@ -1131,6 +1135,7 @@ $quota = New-Object System.Windows.Forms.ToolStripMenuItem($quotaLabel)
         $quota.Add_Click({ $script:manualBubbleHidden = $false; Set-AgentPetWindowVisible $true; Set-ActiveBubblePanel "quota"; Request-QuotaRefresh; Show-Bubble 0 -Force })
         $quote.Add_Click({ $script:manualBubbleHidden = $false; Set-AgentPetWindowVisible $true; $QuoteText.Text = Get-RandomCharacterQuote $Config.Character; Set-ActiveBubblePanel "quote"; Show-Bubble 5.5 })
         $bubbleHide.Add_Click({ $script:manualBubbleHidden = $true; Hide-Bubble })
+        $apiKeyItem.Add_Click({ Show-ApiKeyDialog })
         $pause10.Add_Click({ $Config.PauseMonitorUntil = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() + 600000; Save-Config; Update-TrayTooltip -Force })
         $pause30.Add_Click({ $Config.PauseMonitorUntil = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() + 1800000; Save-Config; Update-TrayTooltip -Force })
         $resume.Add_Click({ $Config.PauseMonitorUntil = 0; Save-Config; Update-TrayTooltip -Force })
@@ -1543,6 +1548,154 @@ $MenuXaml = @"
 </ContextMenu>
 "@
 
+# ============================================================================
+# 设置 DeepSeek API Key 对话框
+# ============================================================================
+function Test-DeepSeekApiKey([string]$key) {
+    $key = ($key + '').Trim()
+    if (-not $key) { return @{ Ok = $false; Message = '请先填入 Key' } }
+    try {
+        $res = Invoke-RestMethod -Uri 'https://api.deepseek.com/user/balance' `
+            -Headers @{ Authorization = "Bearer $key"; Accept = 'application/json' } `
+            -TimeoutSec 12
+        $cny = @($res.balance_infos) | Where-Object { $_ -and $_.currency -eq 'CNY' } | Select-Object -First 1
+        if ($cny) {
+            return @{ Ok = $true; Message = ('连接成功，当前余额 ¥' + ([double]$cny.total_balance).ToString('F2')) }
+        }
+        return @{ Ok = $true; Message = '连接成功（未返回人民币余额）' }
+    } catch {
+        $code = 0
+        try { if ($_.Exception.Response) { $code = [int]$_.Exception.Response.StatusCode } } catch {}
+        $msg = switch ($code) {
+            401 { 'Key 无效或已失效（HTTP 401）' }
+            402 { '账户余额不足（HTTP 402）' }
+            403 { '无权访问该账号（HTTP 403）' }
+            429 { '请求过于频繁（HTTP 429），稍后再试' }
+            default { '请求失败：' + $_.Exception.Message }
+        }
+        return @{ Ok = $false; Message = $msg }
+    }
+}
+
+function New-DlgButton([string]$text, [bool]$primary) {
+    $b = New-Object System.Windows.Controls.Button
+    $b.Content = $text
+    $b.MinWidth = 86
+    $b.Height = 30
+    $b.Margin = New-Object System.Windows.Thickness(8, 0, 0, 0)
+    $b.FontSize = 12.5
+    $b.Cursor = 'Hand'
+    if ($primary) {
+        $b.Background = $BrushConv.ConvertFromString('#FF2F6BD6')
+        $b.Foreground = [System.Windows.Media.Brushes]::White
+        $b.BorderThickness = New-Object System.Windows.Thickness(0)
+        $b.FontWeight = 'SemiBold'
+    }
+    return $b
+}
+
+function Show-ApiKeyDialog {
+    $dlg = New-Object System.Windows.Window
+    $dlg.Title = '设置 DeepSeek API Key'
+    $dlg.Width = 470
+    $dlg.SizeToContent = 'Height'
+    $dlg.WindowStyle = 'ToolWindow'
+    $dlg.ResizeMode = 'NoResize'
+    $dlg.WindowStartupLocation = 'CenterScreen'
+    $dlg.Topmost = $true
+    $dlg.FontFamily = 'Microsoft YaHei UI, Segoe UI'
+    $dlg.Background = $BrushConv.ConvertFromString('#FFFDFBF8')
+    try { $dlg.Owner = $Window } catch {}
+
+    $panel = New-Object System.Windows.Controls.StackPanel
+    $panel.Margin = New-Object System.Windows.Thickness(20, 16, 20, 16)
+
+    $title = New-Object System.Windows.Controls.TextBlock
+    $title.Text = 'DeepSeek API Key'
+    $title.FontSize = 14
+    $title.FontWeight = 'SemiBold'
+    $title.Foreground = $BrushConv.ConvertFromString('#FF1E2B44')
+    [void]$panel.Children.Add($title)
+
+    $hint = New-Object System.Windows.Controls.TextBlock
+    $hint.Text = '在 platform.deepseek.com 创建，形如 sk- 开头的一串；只保存在本机 config.json 里。'
+    $hint.FontSize = 11.5
+    $hint.TextWrapping = 'Wrap'
+    $hint.Margin = New-Object System.Windows.Thickness(0, 5, 0, 10)
+    $hint.Foreground = $BrushConv.ConvertFromString('#FF6B7A90')
+    [void]$panel.Children.Add($hint)
+
+    $pwd = New-Object System.Windows.Controls.PasswordBox
+    $pwd.Height = 32
+    $pwd.FontSize = 13
+    $pwd.Padding = New-Object System.Windows.Thickness(8, 4, 8, 4)
+    $pwd.FontFamily = 'Consolas, Microsoft YaHei UI'
+    if ($Config.DeepSeekApiKey) { $pwd.Password = [string]$Config.DeepSeekApiKey }
+    [void]$panel.Children.Add($pwd)
+
+    $status = New-Object System.Windows.Controls.TextBlock
+    $status.FontSize = 11.5
+    $status.TextWrapping = 'Wrap'
+    $status.MinHeight = 16
+    $status.Margin = New-Object System.Windows.Thickness(0, 8, 0, 0)
+    $status.Foreground = $BrushConv.ConvertFromString('#FF6B7A90')
+    [void]$panel.Children.Add($status)
+
+    $btns = New-Object System.Windows.Controls.StackPanel
+    $btns.Orientation = 'Horizontal'
+    $btns.HorizontalAlignment = 'Right'
+    $btns.Margin = New-Object System.Windows.Thickness(0, 10, 0, 0)
+    $btnPaste  = New-DlgButton '从剪贴板粘贴' $false
+    $btnTest   = New-DlgButton '测试' $false
+    $btnCancel = New-DlgButton '取消' $false
+    $btnSave   = New-DlgButton '保存' $true
+    [void]$btns.Children.Add($btnPaste)
+    [void]$btns.Children.Add($btnTest)
+    [void]$btns.Children.Add($btnCancel)
+    [void]$btns.Children.Add($btnSave)
+    [void]$panel.Children.Add($btns)
+
+    $dlg.Content = $panel
+
+    $btnPaste.Add_Click({
+        try {
+            if ([System.Windows.Clipboard]::ContainsText()) {
+                $pwd.Password = ([System.Windows.Clipboard]::GetText()).Trim()
+                $status.Text = '已从剪贴板粘贴'
+            } else {
+                $status.Text = '剪贴板里没有文本'
+            }
+        } catch { $status.Text = '读取剪贴板失败' }
+    })
+
+    $btnTest.Add_Click({
+        $k = ($pwd.Password + '').Trim()
+        if (-not $k) { $status.Text = '请先填入 Key'; return }
+        $status.Text = '测试中…'
+        $r = Test-DeepSeekApiKey $k
+        $status.Text = $r.Message
+        $status.Foreground = if ($r.Ok) { $BrushConv.ConvertFromString('#FF1F9254') } else { $BrushConv.ConvertFromString('#FFD14343') }
+    })
+
+    $btnCancel.Add_Click({ $dlg.Close() })
+    $dlg.Add_KeyDown({ param($s, $e) if ($e.Key -eq 'Escape') { $dlg.Close() } })
+
+    $btnSave.Add_Click({
+        $k = ($pwd.Password + '').Trim()
+        if (-not $k) { $status.Text = '请先填入 Key'; return }
+        $Config.DeepSeekApiKey = $k
+        $script:forceSaveManualFields = $true
+        Save-Config
+        Request-QuotaRefresh
+        $dlg.Close()
+        $r = Test-DeepSeekApiKey $k
+        $icon = if ($r.Ok) { 'Information' } else { 'Warning' }
+        [void][System.Windows.MessageBox]::Show($r.Message, 'DeepSeek API Key 已保存', 'OK', $icon)
+    })
+
+    [void]$dlg.ShowDialog()
+}
+
 function Build-ContextMenu {
     $cm = [System.Windows.Markup.XamlReader]::Parse($MenuXaml)
 
@@ -1653,6 +1806,11 @@ function Build-ContextMenu {
         Show-Bubble 5.5
     })
     [void]$cm.Items.Add($miSayQuote)
+
+    $miApiKey = New-Object System.Windows.Controls.MenuItem
+    $miApiKey.Header = "设置 DeepSeek API Key…"
+    $miApiKey.Add_Click({ Show-ApiKeyDialog })
+    [void]$cm.Items.Add($miApiKey)
 
     [void]$cm.Items.Add((New-Object System.Windows.Controls.Separator))
 
