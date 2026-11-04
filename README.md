@@ -29,7 +29,7 @@ Windows 桌面宠物（PowerShell + WPF 原生实现）。她会读取本机上 
 
 1. 解压后双击 **`启动 AgentPet.bat`**
 2. 首次运行会自动生成 `app/config.json`
-3. 想用余额看板：把 DeepSeek API Key 填进 `app/config.json` 的 `DeepSeekApiKey`
+3. 想用余额看板：右键桌宠 → **「设置 DeepSeek API Key…」**，粘贴 key 保存即可（会自动校验并刷新余额）
 
 | 操作 | 方式 |
 |---|---|
@@ -52,6 +52,7 @@ Windows 桌面宠物（PowerShell + WPF 原生实现）。她会读取本机上 
 - DeepSeek 余额看板（直连官方 `/user/balance`，与 Codex 额度共存并自动切换）
 - 第四位角色「小鲸鱼」及配套主题配色、台词、托盘图标
 - 低余额提醒（边沿触发，忙时顺延不丢失）
+- **设置 DeepSeek API Key 的输入对话框**：右键菜单与托盘菜单均可打开，支持从剪贴板粘贴、先测后存、保存后自动刷新余额
 
 **修复**
 
